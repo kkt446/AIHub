@@ -130,25 +130,44 @@ def shot_card(shot, width, y_center=None, radius=26, shadow=True, canvas=None):
 
 
 def scene_intro(t, dur):
-    bg = BASE_INTRO.copy()
-    canvas = bg.convert("RGBA")
+    canvas = BASE_INTRO.copy().convert("RGBA")
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
     p = ease_out(t / 1.2)
-    scale = 0.86 + 0.14 * p
-    w = int(210 * scale)
+    w = int(210 * (0.86 + 0.14 * p))
     logo = LOGO.resize((w, w), Image.LANCZOS)
     a = int(255 * min(1.0, t / 0.8))
-    logo.putalpha(logo.split()[3].point(lambda v: int(v * a / 255)))
-    canvas.alpha_composite(logo, ((W - logo.width) // 2, 300 + int(20 * (1 - p))))
-    d = ImageDraw.Draw(canvas)
-    ta = int(255 * max(0.0, min(1.0, (t - 0.6) / 1.0)))
-    if ta > 0:
-        f = font(120)
-        tw = d.textlength("AIHub", font=f)
-        d.text(((W - tw) / 2, 556), "AIHub", font=f, fill=(255, 255, 255, ta))
-        f2 = font(42, bold=False)
-        sub = "三个 AI 客户端 · 一个工作区"
-        sw = d.textlength(sub, font=f2)
-        d.text(((W - sw) / 2, 712), sub, font=f2, fill=ACCENT2 + (int(ta * 0.95),))
+    if a < 255:
+        r, g, b, al = logo.split()
+        logo.putalpha(al.point(lambda v: int(v * a / 255)))
+    layer.alpha_composite(logo, ((W - w) // 2, 268 + int(18 * (1 - p))))
+
+    def fade(start, dur_=0.7, full=255):
+        return int(full * max(0.0, min(1.0, (t - start) / dur_)))
+
+    a1 = fade(0.6, 0.8)
+    if a1:
+        d.text(((W - d.textlength("AIHub", font=font(118))) / 2, 496), "AIHub",
+               font=font(118), fill=(255, 255, 255, a1))
+    a2 = fade(1.05, 0.8)
+    if a2:
+        tag = "让三个 AI 客户端，共用同一个工作区"
+        d.text(((W - d.textlength(tag, font=font(46, bold=False))) / 2, 652), tag,
+               font=font(46, bold=False), fill=(228, 233, 252, a2))
+    pills = ["Qoder", "Qoder CN", "DeepSeek Harness"]
+    fpill = font(28, bold=False)
+    widths = [d.textlength(s, font=fpill) + 48 for s in pills]
+    total = sum(widths) + 20 * (len(pills) - 1)
+    x = (W - total) / 2
+    for i, (s_, pw) in enumerate(zip(pills, widths)):
+        a3 = fade(1.5 + i * 0.25, 0.6, 232)
+        if a3:
+            d.rounded_rectangle((x, 748, x + pw, 748 + 56), radius=28,
+                                outline=(150, 170, 255, a3), width=2,
+                                fill=(255, 255, 255, int(a3 * 0.10)))
+            d.text((x + 24, 762), s_, font=fpill, fill=(235, 240, 255, a3))
+        x += pw + 20
+    canvas.alpha_composite(layer)
     return canvas
 
 
@@ -268,7 +287,6 @@ def make_audio(path, seconds):
     sr = 44100
     n = int(sr * seconds)
     t = np.arange(n) / sr
-    mix = np.zeros(n)
     chords = [
         (220.00, 261.63, 329.63),
         (174.61, 220.00, 261.63),
@@ -276,31 +294,63 @@ def make_audio(path, seconds):
         (196.00, 246.94, 293.66),
     ]
     seg = seconds / len(chords)
+
+    pad = np.zeros(n)
     for i, ch in enumerate(chords):
         start, end = i * seg, min(seconds, (i + 1) * seg)
         m = (t >= start) & (t < end)
         local = t[m] - start
-        env = np.minimum(1.0, local / 1.6) * np.minimum(1.0, np.clip((seg - local) / 1.6, 0, 1))
+        env = np.minimum(1.0, local / 1.2) * np.minimum(1.0, np.clip((seg - local) / 1.2, 0, 1))
         tone = np.zeros(m.sum())
         for f in ch:
-            for det in (-0.6, 0.0, 0.6):
+            for det in (-0.5, 0.0, 0.5):
                 tone += np.sin(2 * np.pi * (f + det) * local) / 3
-        tone += 0.6 * np.sin(2 * np.pi * (ch[0] / 2) * local)
-        lfo = 0.85 + 0.15 * np.sin(2 * np.pi * 0.12 * local)
-        mix[m] += tone * env * lfo
-    # soft pulse every 2.75s
-    for beat in np.arange(1.0, seconds - 1.0, 2.75):
-        pass
-    pulse = np.zeros(n)
-    for bt in np.arange(2.0, seconds - 1.2, 2.75):
-        m = (t >= bt) & (t < bt + 0.5)
-        local = t[m] - bt
-        pulse[m] += np.sin(2 * np.pi * 55 * local) * np.exp(-6 * local) * 0.35
-    mix = mix * 0.55 + pulse
-    fade = np.minimum(1.0, t / 1.5) * np.minimum(1.0, np.clip((seconds - t) / 3.0, 0, 1))
+        pad[m] += tone * env
+    pad *= 0.16
+
+    beat = 60 / 100
+    bass = np.zeros(n)
+    for i, ch in enumerate(chords):
+        for k in np.arange(i * seg, min(seconds, (i + 1) * seg) - 0.001, beat * 2):
+            m = (t >= k) & (t < k + beat * 1.9)
+            local = t[m] - k
+            bass[m] += np.sin(2 * np.pi * ch[0] / 2 * local) * np.exp(-2.5 * local)
+    bass *= 0.22
+
+    arp = np.zeros(n)
+    pattern = [0, 1, 2, 1, 2, 1, 0, 2]
+    idx = 0
+    for k in np.arange(0.0, seconds, beat / 2):
+        ch = chords[min(3, int(k // seg))]
+        f = ch[pattern[idx % len(pattern)]] * 2
+        m = (t >= k) & (t < k + beat * 0.9)
+        local = t[m] - k
+        arp[m] += np.sin(2 * np.pi * f * local) * np.exp(-7 * local)
+        idx += 1
+    gate = np.clip((t - 4.0) / 2.0, 0, 1) * np.clip((seconds - 6.0 - t) / 3.0, 0, 1)
+    arp *= 0.10 * gate
+
+    kick = np.zeros(n)
+    for k in np.arange(5.0, seconds - 2.0, beat):
+        m = (t >= k) & (t < k + 0.35)
+        local = t[m] - k
+        kick[m] += np.sin(2 * np.pi * (58 - 18 * local) * local) * np.exp(-12 * local)
+    kick *= 0.30
+
+    rng = np.random.default_rng(7)
+    hats = np.zeros(n)
+    for k in np.arange(5.0, seconds - 2.0, beat / 2):
+        m = (t >= k) & (t < k + 0.08)
+        local = t[m] - k
+        hats[m] += rng.standard_normal(m.sum()) * np.exp(-50 * local)
+    hats *= 0.035
+
+    mix = pad + bass + arp + kick + hats
+    fade = np.minimum(1.0, t / 1.2) * np.minimum(1.0, np.clip((seconds - t) / 3.0, 0, 1))
     mix *= fade
-    mix = mix / max(1e-6, np.max(np.abs(mix))) * 0.22
-    stereo = np.stack([mix, np.roll(mix, 90)], axis=1)
+    mix = np.tanh(mix * 1.3) / np.tanh(1.3)
+    mix = mix / max(1e-6, np.max(np.abs(mix))) * 0.42
+    stereo = np.stack([mix, np.roll(mix, 64)], axis=1)
     data = (stereo * 32767).astype(np.int16).tobytes()
     with wave.open(path, "wb") as w:
         w.setnchannels(2)
