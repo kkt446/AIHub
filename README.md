@@ -10,6 +10,10 @@
   <img src="assets/screenshot.png" width="880" alt="AIHub 主界面">
 </p>
 
+<p align="center">
+  <a href="https://github.com/kkt446/AIHub/releases/download/v0.1.0/AIHub-promo-1080p.mp4">▶ 观看宣传片（44 秒 · 1080p）</a>
+</p>
+
 ## 它解决什么问题
 
 Qoder（国际版）、Qoder CN、DeepSeek Harness（dsh）各自把会话存放在自己的目录里，彼此看不见。把三个客户端都指向同一个项目工作区后，它们依然只看得见自己的历史。

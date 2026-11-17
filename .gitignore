@@ -14,3 +14,7 @@ AGENTS.local.md
 
 # logs
 *.log
+
+# promo render output (mp4 is shipped as a release asset)
+tools/promo/out/
+assets/promo.mp4
