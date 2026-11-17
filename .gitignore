@@ -1,0 +1,16 @@
+# build output
+bin/
+obj/
+dist/
+publish/
+*.user
+*.suo
+.vs/
+
+# generated / local test data
+hub-test/
+.aihub/
+AGENTS.local.md
+
+# logs
+*.log

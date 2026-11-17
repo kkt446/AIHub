@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>AIHub.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\AIHub.ico</ApplicationIcon>
+    <Version>0.1.0</Version>
+    <FileVersion>0.1.0.0</FileVersion>
+    <AssemblyTitle>AIHub</AssemblyTitle>
+    <Product>AIHub</Product>
+    <Company>kkt446</Company>
+    <Description>共享工作区：Qoder / Qoder CN / DeepSeek Harness 会话互通</Description>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <!-- No VS UWP AppxPackage tasks on this machine; skip PRI/MSIX tooling -->
+    <EnableCoreMrtTooling Condition="'$(BuildingInsideVisualStudio)' != 'true'">false</EnableCoreMrtTooling>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.250205002" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.1742" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AIHub.Core\AIHub.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Build resources.pri with makepri.exe since VS AppxPackage tasks are unavailable -->
+  <PropertyGroup>
+    <MakepriExe>$(NuGetPackageRoot)microsoft.windows.sdk.buildtools\10.0.26100.1742\bin\10.0.26100.0\x64\makepri.exe</MakepriExe>
+  </PropertyGroup>
+
+  <Target Name="MakeResourcesPri" AfterTargets="Build" Condition="'$(EnableCoreMrtTooling)' != 'true' and Exists('$(MakepriExe)')">
+    <PropertyGroup>
+      <_PriLayoutDir>$(IntermediateOutputPath)prilayout</_PriLayoutDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <_PriInput Include="$(OutDir)App.xbf" />
+      <_PriInput Include="$(OutDir)MainWindow.xbf" />
+      <_PriInput Include="$(OutDir)Microsoft.UI.pri" />
+      <_PriInput Include="$(OutDir)Microsoft.UI.Xaml.Controls.pri" />
+    </ItemGroup>
+    <RemoveDir Directories="$(_PriLayoutDir)" />
+    <Copy SourceFiles="@(_PriInput)" DestinationFolder="$(_PriLayoutDir)" />
+    <Exec Command="&quot;$(MakepriExe)&quot; new /pr &quot;$(MSBuildProjectDirectory)\$(_PriLayoutDir)&quot; /cf &quot;$(MSBuildProjectDirectory)\pri\priconfig.xml&quot; /in AIHub.App /of &quot;$(OutDir)resources.pri&quot; /o" />
+  </Target>
+
+  <!-- resources.pri and the compiled XAML (.xbf) live in the build output; publish does not copy them on its own -->
+  <Target Name="CopyPriToPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <ItemGroup>
+      <_PublishArtifact Include="$(OutDir)*.xbf" />
+      <_PublishArtifact Include="$(OutDir)resources.pri" Condition="Exists('$(OutDir)resources.pri')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_PublishArtifact)" DestinationFolder="$(PublishDir)" />
+  </Target>
+
+</Project>
