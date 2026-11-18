@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { ClipboardCopy, Download, FileText, Sparkles, Terminal } from "lucide-react";
 import { toast } from "sonner";
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useHub } from "@/components/hub-provider";
+import { isDesktop, onDesktop, sendDesktop } from "@/lib/desktop";
 import { buildHandoff } from "@/lib/handoff";
 import { oneLine, relTime, lastMessage } from "@/lib/format";
 
@@ -18,6 +19,14 @@ function HandoffPage() {
   const { state } = useHub();
   const markdown = useMemo(() => buildHandoff(state.data), [state.data]);
   const latest = state.data.sessions[0];
+
+  useEffect(
+    () =>
+      onDesktop((event) => {
+        if (event.type === "status") toast.info(event.message);
+      }),
+    [],
+  );
 
   const copy = () => {
     navigator.clipboard
@@ -87,6 +96,18 @@ function HandoffPage() {
               <TabsTrigger value="raw" className="text-xs">Markdown</TabsTrigger>
             </TabsList>
             <div className="flex gap-2">
+              {isDesktop() && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => {
+                    if (!sendDesktop("handoff")) toast.error("桌面桥未连接");
+                  }}
+                >
+                  写入工作区
+                </Button>
+              )}
               <Button variant="outline" size="sm" onClick={copy} className="gap-1.5">
                 <ClipboardCopy className="size-3.5" /> 复制
               </Button>

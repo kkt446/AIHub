@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   ArrowLeftRight,
@@ -18,6 +18,7 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { useHub } from "@/components/hub-provider";
+import { isDesktop, onDesktop, sendDesktop } from "@/lib/desktop";
 import { CLIENT_META, type ClientId } from "@/lib/hub";
 
 export const Route = createFileRoute("/settings")({
@@ -33,9 +34,32 @@ function SettingsPage() {
     qodercn: true,
     dsh: true,
   });
+  const [pending, setPending] = useState("");
+
+  useEffect(
+    () =>
+      onDesktop((event) => {
+        if (event.type !== "status") return;
+        setPending("");
+        toast.info(event.message);
+      }),
+    [],
+  );
 
   const total = state.data.sessions.length;
   const byClient = (client: ClientId) => state.data.sessions.filter((s) => s.client === client).length;
+
+  const run = (type: string, label: string, fallback: string) => {
+    if (!isDesktop()) {
+      toast.info(fallback);
+      return;
+    }
+    if (!sendDesktop(type)) {
+      toast.error("桌面桥未连接");
+      return;
+    }
+    setPending(label);
+  };
 
   const copyPath = () => {
     navigator.clipboard
@@ -63,11 +87,36 @@ function SettingsPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => toast.info("桌面端可直接打开工作区文件夹")}
+              disabled={pending.length > 0}
+              onClick={() => run("openFolder", "", "桌面端可直接打开工作区文件夹")}
             >
               打开文件夹
             </Button>
-            <ImportDialog />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pending.length > 0}
+              onClick={() => run("chooseWorkspace", "切换工作区", "切换工作区仅在桌面端可用")}
+            >
+              切换工作区
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pending.length > 0}
+              onClick={() => run("refresh", "重新导入", "重新导入仅在桌面端可用")}
+            >
+              {pending === "重新导入" ? "导入中…" : "重新导入"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pending.length > 0}
+              onClick={() => run("hooks", "启用自动交接", "启用自动交接仅在桌面端可用")}
+            >
+              启用自动交接
+            </Button>
+            {!isDesktop() && <ImportDialog />}
           </div>
         </div>
       </section>
@@ -146,15 +195,17 @@ function SettingsPage() {
               variant="outline"
               size="sm"
               className="gap-1.5"
-              onClick={() => toast.info("在桌面端运行：aihub.exe db-sync")}
+              disabled={pending.length > 0}
+              onClick={() => run("sync", "立即同步", "在桌面端运行：aihub.exe db-sync")}
             >
-              <RefreshCcw className="size-3.5" /> 立即同步
+              <RefreshCcw className="size-3.5" /> {pending === "立即同步" ? "同步中…" : "立即同步"}
             </Button>
             <Button
               variant="ghost"
               size="sm"
               className="gap-1.5"
-              onClick={() => toast.info("在桌面端运行：aihub.exe db-sync-undo")}
+              disabled={pending.length > 0}
+              onClick={() => run("syncUndo", "撤销镜像", "在桌面端运行：aihub.exe db-sync-undo")}
             >
               <RotateCcw className="size-3.5" /> 撤销镜像
             </Button>
@@ -180,7 +231,7 @@ function SettingsPage() {
       </section>
 
       <p className="pb-4 text-center text-[11px] text-muted-foreground">
-        AIHub v0.2 · WinUI 桌面端 + Meoo Web 控制台
+        AIHub 桌面版 · Qoder / Qoder CN / dsh 共享工作区
       </p>
     </div>
   );

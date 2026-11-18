@@ -32,7 +32,9 @@ public partial class App : Application
         Log($"LAUNCH dir={AppContext.BaseDirectory} dotnet={Environment.Version} os={Environment.OSVersion}");
         try
         {
-            Window = new MainWindow();
+            var smoke = Environment.GetCommandLineArgs()
+                .Any(a => a.Equals("--smoke", StringComparison.OrdinalIgnoreCase));
+            Window = new MainWindow(smoke);
             Window.Activate();
         }
         catch (Exception ex)

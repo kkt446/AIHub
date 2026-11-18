@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { DEMO_DATA } from "@/lib/demo-data";
+import { onDesktop, sendDesktop } from "@/lib/desktop";
 import { isHubData, normalizeSession, type HubData, type HubState } from "@/lib/hub";
 
 const STORAGE_KEY = "aihub.hubData";
@@ -7,6 +8,7 @@ const STORAGE_KEY = "aihub.hubData";
 declare global {
   interface Window {
     __AIHUB_DATA__?: HubData;
+    __AIHUB_STATE__?: { source: string; sessions: number; workspace: string };
     aihubReceive?: (payload: string | HubData) => string;
   }
 }
@@ -26,6 +28,7 @@ function withNormalized(data: HubData): HubData {
     sessions: data.sessions
       .map(normalizeSession)
       .sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime()),
+    ...(data.assetBase ? { assetBase: data.assetBase } : {}),
   };
 }
 
@@ -78,18 +81,34 @@ export function HubProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    window.aihubReceive = (payload) => {
+    const receive = (payload: string | HubData) => {
       if (typeof payload === "string") return importJson(payload).message;
       if (isHubData(payload)) {
-        setState({ data: withNormalized(payload), source: "live" });
+        const next = withNormalized(payload);
+        window.__AIHUB_DATA__ = next;
+        setState({ data: next, source: "live" });
         return `已接收 ${payload.sessions.length} 个会话`;
       }
       return "数据格式不正确";
     };
+    window.aihubReceive = receive;
+    const off = onDesktop((event) => {
+      if (event.type === "data") receive(event.payload);
+    });
+    sendDesktop("ready");
     return () => {
       delete window.aihubReceive;
+      off();
     };
   }, [importJson]);
+
+  useEffect(() => {
+    window.__AIHUB_STATE__ = {
+      source: state.source,
+      sessions: state.data.sessions.length,
+      workspace: state.data.workspace,
+    };
+  }, [state]);
 
   const value = useMemo(() => ({ state, importJson, resetToDemo }), [state, importJson, resetToDemo]);
   return <HubContext.Provider value={value}>{children}</HubContext.Provider>;

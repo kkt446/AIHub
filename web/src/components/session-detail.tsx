@@ -4,6 +4,7 @@ import { ClientBadge } from "@/components/client-badge";
 import { MessageRow } from "@/components/message-row";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useHub } from "@/components/hub-provider";
 import { countAttachments, fmtClock, relTime } from "@/lib/format";
 import { CLIENT_META, ROLE_LABEL, type HubSession } from "@/lib/hub";
 
@@ -20,6 +21,7 @@ function copyTranscript(session: HubSession) {
 }
 
 export function SessionDetail({ session }: { session: HubSession | null }) {
+  const { state } = useHub();
   if (!session) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground">
@@ -33,6 +35,11 @@ export function SessionDetail({ session }: { session: HubSession | null }) {
   }
 
   const atts = countAttachments(session.messages);
+  const assetBase = state.data.assetBase;
+  const imageUrl = assetBase
+    ? (name: string) =>
+        `${assetBase}/sessions/${encodeURIComponent(session.key)}/attachments/${encodeURIComponent(name)}`
+    : undefined;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -64,7 +71,7 @@ export function SessionDetail({ session }: { session: HubSession | null }) {
         <div className="space-y-4 px-5 py-5">
           {session.messages.map((message, index) => (
             <div key={message.id} className="animate-fade" style={{ animationDelay: `${Math.min(index, 8) * 30}ms` }}>
-              <MessageRow message={message} />
+              <MessageRow message={message} imageUrl={imageUrl} />
               <div className="mt-1 px-10 text-[10px] text-muted-foreground/70">
                 {index === 0 ? fmtClock(session.updated) : ""}
               </div>

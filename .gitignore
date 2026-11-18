@@ -18,3 +18,6 @@ AGENTS.local.md
 # promo render output (mp4 is shipped as a release asset)
 tools/promo/out/
 assets/promo.mp4
+
+# embedded web UI (copied from web/dist)
+src/AIHub.App/webroot/

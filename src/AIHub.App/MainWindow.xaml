@@ -3,93 +3,12 @@
     x:Class="AIHub.App.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:AIHub.App"
     Title="AIHub 共享工作区">
 
-    <Grid Padding="12" RowSpacing="8">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
-
-        <Grid ColumnSpacing="8">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Text="通用工作区" VerticalAlignment="Center" Style="{ThemeResource BodyStrongTextBlockStyle}"/>
-            <TextBox x:Name="WorkspaceBox" Grid.Column="1" PlaceholderText="工作区文件夹路径" VerticalAlignment="Center"/>
-            <Button x:Name="SwitchButton" Grid.Column="2" Content="打开" Click="OnSwitchWorkspace" Style="{ThemeResource AccentButtonStyle}"/>
-            <Button x:Name="ImportButton" Grid.Column="3" Content="导入三端会话" Click="OnImport"/>
-            <Button x:Name="HooksButton" Grid.Column="4" Content="启用自动交接" Click="OnSetupHooks"/>
-            <Button x:Name="HandoffButton" Grid.Column="5" Content="生成交接" Click="OnHandoff"/>
-            <Button x:Name="OpenFolderButton" Grid.Column="6" Content="打开文件夹" Click="OnOpenFolder"/>
-        </Grid>
-
-        <TextBlock x:Name="StatusText" Grid.Row="1" Style="{ThemeResource CaptionTextBlockStyle}"
-                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="准备就绪"/>
-
-        <Grid Grid.Row="2" ColumnSpacing="8">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="340"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-
-            <ListView x:Name="SessionList" SelectionMode="Single" SelectionChanged="OnSessionSelected"
-                      BorderThickness="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" CornerRadius="8">
-                <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="local:SessionRow">
-                        <Grid Padding="4" RowSpacing="2">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-                            <TextBlock Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" MaxLines="1" Style="{ThemeResource BodyTextBlockStyle}"/>
-                            <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
-                                <TextBlock Text="{x:Bind Client}" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Style="{ThemeResource CaptionTextBlockStyle}"/>
-                                <TextBlock Text="{x:Bind When}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{ThemeResource CaptionTextBlockStyle}"/>
-                                <TextBlock Text="{x:Bind Counts}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{ThemeResource CaptionTextBlockStyle}"/>
-                            </StackPanel>
-                        </Grid>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
-
-            <Grid Grid.Column="1" RowSpacing="8">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-
-                <TextBlock x:Name="DetailTitle" Text="选择左侧会话查看内容"
-                           Style="{ThemeResource SubtitleTextBlockStyle}" TextTrimming="CharacterEllipsis"/>
-
-                <ScrollViewer x:Name="MessageScroll" Grid.Row="1"
-                              HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
-                              VerticalScrollMode="Auto" VerticalScrollBarVisibility="Auto">
-                    <StackPanel x:Name="MessagePanel" Spacing="8" Padding="4" HorizontalAlignment="Stretch"/>
-                </ScrollViewer>
-
-                <Expander x:Name="HandoffExpander" Grid.Row="2" Header="交接内容（Qoder 新会话自动注入 / dsh 读 AGENTS.local.md）" IsExpanded="False">
-                    <Grid RowSpacing="6">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="240"/>
-                        </Grid.RowDefinitions>
-                        <Button Content="复制交接内容" Click="OnCopyHandoff" HorizontalAlignment="Left"/>
-                        <TextBox x:Name="HandoffBox" Grid.Row="1" IsReadOnly="True" AcceptsReturn="True"
-                                 TextWrapping="Wrap" FontFamily="Consolas" FontSize="12"/>
-                    </Grid>
-                </Expander>
-            </Grid>
-        </Grid>
+    <Grid>
+        <WebView2 x:Name="HubView" />
+        <TextBlock x:Name="FallbackText" Visibility="Collapsed"
+                   Margin="32" TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center"
+                   Foreground="Gray"/>
     </Grid>
 </Window>

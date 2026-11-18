@@ -23,7 +23,13 @@ const avatarVariants = cva("mt-0.5 grid size-7 shrink-0 place-items-center round
   defaultVariants: { side: "assistant" },
 });
 
-export function MessageRow({ message }: { message: HubMessage }) {
+export function MessageRow({
+  message,
+  imageUrl,
+}: {
+  message: HubMessage;
+  imageUrl?: (name: string) => string | undefined;
+}) {
   if (message.role === "tool_call" || message.role === "tool_result") {
     const isCall = message.role === "tool_call";
     return (
@@ -50,15 +56,29 @@ export function MessageRow({ message }: { message: HubMessage }) {
         <p className="whitespace-pre-wrap break-words">{message.text}</p>
         {message.attachments && message.attachments.length > 0 && (
           <div className="mt-2.5 flex flex-wrap gap-2">
-            {message.attachments.map((att) => (
-              <div
-                key={att.name}
-                className="flex items-center gap-2 rounded-lg border border-white/15 bg-black/15 px-2.5 py-1.5 text-[11px]"
-              >
-                {att.kind === "image" ? <FileImage className="size-3.5" /> : <Paperclip className="size-3.5" />}
-                <span className="max-w-[180px] truncate font-mono">{att.name}</span>
-              </div>
-            ))}
+            {message.attachments.map((att) => {
+              const src = att.kind === "image" ? imageUrl?.(att.name) : undefined;
+              if (src) {
+                return (
+                  <img
+                    key={att.name}
+                    src={src}
+                    alt={att.name}
+                    loading="lazy"
+                    className="max-h-40 max-w-full rounded-lg border border-white/15 object-contain"
+                  />
+                );
+              }
+              return (
+                <div
+                  key={att.name}
+                  className="flex items-center gap-2 rounded-lg border border-white/15 bg-black/15 px-2.5 py-1.5 text-[11px]"
+                >
+                  {att.kind === "image" ? <FileImage className="size-3.5" /> : <Paperclip className="size-3.5" />}
+                  <span className="max-w-[180px] truncate font-mono">{att.name}</span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

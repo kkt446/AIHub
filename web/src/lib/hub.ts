@@ -27,6 +27,7 @@ export interface HubData {
   workspace: string;
   generatedAt: string;
   sessions: HubSession[];
+  assetBase?: string;
 }
 
 export type DataSource = "live" | "imported" | "demo";

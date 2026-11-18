@@ -1,55 +1,31 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AIHub.Core;
-using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Imaging;
-using Windows.ApplicationModel.DataTransfer;
-using Windows.Storage;
-using Windows.UI;
+using Microsoft.Web.WebView2.Core;
+using Windows.Storage.Pickers;
 
 namespace AIHub.App;
 
-public sealed class SessionRow
-{
-    public string Key { get; init; } = "";
-    public string Title { get; init; } = "";
-    public string Client { get; init; } = "";
-    public string When { get; init; } = "";
-    public string Counts { get; init; } = "";
-    public SessionMeta Meta { get; init; } = new();
-    public override string ToString() => Title;
-}
-
 public sealed partial class MainWindow : Window
 {
-    string _workspace = "";
-    SessionMeta? _selected;
-    string _hooksPath = "";
+    readonly bool _smoke;
+    string _workspace;
 
-    public MainWindow()
+    public MainWindow(bool smoke = false)
     {
         InitializeComponent();
-        ExtendsContentIntoTitleBar = false;
+        _smoke = smoke;
         try { AppWindow.Resize(new Windows.Graphics.SizeInt32(1480, 940)); }
         catch (InvalidOperationException) { }
-
-        _workspace = LoadWorkspace();
-        WorkspaceBox.Text = _workspace;
-        if (Content is FrameworkElement root)
+        if (smoke)
         {
-            root.Loaded += async (_, _) =>
-            {
-                var xr = root.XamlRoot;
-                root.Width = xr.Size.Width;
-                xr.Changed += (_, _) => root.Width = xr.Size.Width;
-                await ImportAll();
-                Refresh();
-            };
+            try { AppWindow.Move(new Windows.Graphics.PointInt32(-20000, -20000)); }
+            catch (InvalidOperationException) { }
         }
-        MessageScroll.SizeChanged += (_, _) =>
-            MessagePanel.Width = Math.Max(200, MessageScroll.ViewportWidth - 12);
+        _workspace = LoadWorkspace();
+        _ = InitAsync();
     }
 
     static string DefaultWorkspace =>
@@ -57,6 +33,21 @@ public sealed partial class MainWindow : Window
 
     static string SettingsPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AIHub", "settings.txt");
+
+    static string WebRoot => Path.Combine(AppContext.BaseDirectory, "webroot");
+
+    static string WebViewDataDir =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AIHub", "WebView2");
+
+    static void Log(string s)
+    {
+        try
+        {
+            File.AppendAllText(Path.Combine(Path.GetTempPath(), "aihub-app.log"),
+                DateTime.Now.ToString("HH:mm:ss") + " " + s + Environment.NewLine);
+        }
+        catch (IOException) { }
+    }
 
     static string LoadWorkspace()
     {
@@ -84,8 +75,6 @@ public sealed partial class MainWindow : Window
         catch (IOException) { }
     }
 
-    void SetStatus(string text) => StatusText.Text = text;
-
     static string? FindCli()
     {
         var baseDir = AppContext.BaseDirectory;
@@ -97,13 +86,126 @@ public sealed partial class MainWindow : Window
         return candidates.FirstOrDefault(File.Exists);
     }
 
-    async Task ImportAll()
+    async Task InitAsync()
     {
         try
         {
-            SetStatus("正在导入三端会话…");
-            var ws = _workspace;
-            var (q, d, hooks) = await Task.Run(() =>
+            Directory.CreateDirectory(WebViewDataDir);
+            Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", WebViewDataDir);
+            await HubView.EnsureCoreWebView2Async();
+            var core = HubView.CoreWebView2;
+
+            core.Settings.AreDevToolsEnabled = false;
+            core.Settings.AreDefaultContextMenusEnabled = false;
+            core.Settings.IsStatusBarEnabled = false;
+            core.SetVirtualHostNameToFolderMapping("aihub.local", WebRoot, CoreWebView2HostResourceAccessKind.Allow);
+            MapAssets(core);
+
+            core.WebMessageReceived += OnWebMessage;
+            core.NewWindowRequested += (_, e) =>
+            {
+                e.Handled = true;
+                try
+                {
+                    if (Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(e.Uri) { UseShellExecute = true });
+                }
+                catch (Exception ex) { Log("open-url: " + ex.Message); }
+            };
+            core.NavigationCompleted += (sender, e) =>
+            {
+                if (!e.IsSuccess)
+                {
+                    ShowFallback("界面加载失败：" + e.WebErrorStatus);
+                    FinishSmoke(false, "navigation failed: " + e.WebErrorStatus);
+                    return;
+                }
+                if (_smoke) _ = RunSmokeAsync();
+            };
+
+            HubView.Source = new Uri("https://aihub.local/index.html");
+        }
+        catch (Exception e)
+        {
+            Log("webview-init: " + e);
+            ShowFallback("无法启动界面组件（WebView2）。\n请安装 Microsoft Edge WebView2 运行时后重试。\n\n" + e.Message);
+            FinishSmoke(false, "webview init: " + e.Message);
+        }
+    }
+
+    void MapAssets(CoreWebView2 core)
+    {
+        try
+        {
+            core.SetVirtualHostNameToFolderMapping("aihub-assets", WorkspaceHub.HubRoot(_workspace), CoreWebView2HostResourceAccessKind.Allow);
+        }
+        catch (Exception e) { Log("map-assets: " + e.Message); }
+    }
+
+    void ShowFallback(string message)
+    {
+        FallbackText.Text = message;
+        FallbackText.Visibility = Visibility.Visible;
+        HubView.Visibility = Visibility.Collapsed;
+    }
+
+    async Task PushDataAsync()
+    {
+        if (HubView.CoreWebView2 is null) return;
+        try
+        {
+            var node = JsonNode.Parse(WebExport.Build(_workspace))!;
+            node["assetBase"] = "https://aihub-assets";
+            await HubView.CoreWebView2.ExecuteScriptAsync($"window.aihubReceive({node.ToJsonString()})");
+        }
+        catch (Exception e)
+        {
+            Log("push-data: " + e.Message);
+            await StatusAsync("刷新界面数据失败：" + e.Message);
+        }
+    }
+
+    async Task StatusAsync(string message)
+    {
+        Log(message);
+        try
+        {
+            var json = JsonSerializer.Serialize(message);
+            await HubView.CoreWebView2.ExecuteScriptAsync(
+                $"window.chrome.webview.postMessage({{type:'status',message:{json}}})");
+        }
+        catch (Exception e) { Log("status: " + e.Message); }
+    }
+
+    void OnWebMessage(CoreWebView2 sender, CoreWebView2WebMessageReceivedEventArgs args)
+    {
+        string type;
+        try
+        {
+            using var doc = JsonDocument.Parse(args.WebMessageAsJson);
+            type = doc.RootElement.TryGetProperty("type", out var t) ? t.GetString() ?? "" : "";
+        }
+        catch (JsonException) { return; }
+
+        switch (type)
+        {
+            case "ready": _ = PushDataAsync(); break;
+            case "refresh": _ = RefreshAsync(); break;
+            case "sync": _ = SyncAsync(); break;
+            case "syncUndo": _ = UndoSyncAsync(); break;
+            case "hooks": _ = HooksAsync(); break;
+            case "handoff": _ = HandoffAsync(); break;
+            case "openFolder": OpenFolder(); break;
+            case "chooseWorkspace": _ = ChooseWorkspaceAsync(); break;
+        }
+    }
+
+    async Task RefreshAsync()
+    {
+        var ws = _workspace;
+        try
+        {
+            var (q, d, hooks, cnToQoder, qoderToCn) = await Task.Run(() =>
             {
                 var qq = WorkspaceHub.ImportQoder(ws);
                 var dd = WorkspaceHub.ImportDsh(ws);
@@ -115,199 +217,187 @@ public sealed partial class MainWindow : Window
                     catch (IOException) { }
                 }
                 WorkspaceHub.WriteHandoff(ws);
-                return (qq, dd, hookPath);
+                int a = 0, b = 0;
+                try { a = DbSync.Sync(ws, Clients.QoderCn, Clients.Qoder); } catch (Exception) { }
+                try { b = DbSync.Sync(ws, Clients.Qoder, Clients.QoderCn); } catch (Exception) { }
+                return (qq, dd, hookPath, a, b);
             });
-            SetStatus(hooks.Length > 0
-                ? $"导入完成：Qoder {q} 个会话，dsh {d} 个会话；自动交接已启用（{hooks}）"
-                : $"导入完成：Qoder {q} 个会话，dsh {d} 个会话；未找到 aihub.exe，自动交接未启用");
-            _hooksPath = hooks;
+            await PushDataAsync();
+            var hooksNote = hooks.Length > 0 ? "；自动交接已启用" : "";
+            await StatusAsync($"已刷新：Qoder {q} 个会话，dsh {d} 个会话；数据库同步 CN→Qoder {cnToQoder}、Qoder→CN {qoderToCn}{hooksNote}");
         }
         catch (Exception e)
         {
-            SetStatus("导入失败：" + e.Message);
+            await StatusAsync("刷新失败：" + e.Message);
         }
     }
 
-    void OnSetupHooks(object sender, RoutedEventArgs e)
+    async Task SyncAsync()
+    {
+        var ws = _workspace;
+        var (a, b, err) = await Task.Run(() =>
+        {
+            int x = 0, y = 0;
+            var e = "";
+            try { x = DbSync.Sync(ws, Clients.QoderCn, Clients.Qoder); } catch (Exception ex) { e += " Qoder:" + ex.Message; }
+            try { y = DbSync.Sync(ws, Clients.Qoder, Clients.QoderCn); } catch (Exception ex) { e += " CN:" + ex.Message; }
+            return (x, y, e);
+        });
+        await PushDataAsync();
+        await StatusAsync(err.Length > 0
+            ? "同步完成但有错误：" + err.Trim()
+            : $"数据库同步完成：CN→Qoder {a}、Qoder→CN {b}");
+    }
+
+    async Task UndoSyncAsync()
+    {
+        var ws = _workspace;
+        var (a, b) = await Task.Run(() =>
+            (DbSync.Undo(ws, Clients.Qoder), DbSync.Undo(ws, Clients.QoderCn)));
+        await PushDataAsync();
+        await StatusAsync($"已撤销镜像：Qoder {a} 个、Qoder CN {b} 个会话");
+    }
+
+    async Task HooksAsync()
     {
         try
         {
-            var cli = FindCli() ?? throw new FileNotFoundException("找不到 aihub.exe");
-            var path = WorkspaceHub.EnsureHooks(_workspace, cli);
-            SetStatus("自动交接已启用：" + path);
+            var ws = _workspace;
+            var path = await Task.Run(() =>
+            {
+                var cli = FindCli() ?? throw new FileNotFoundException("找不到 aihub.exe");
+                return WorkspaceHub.EnsureHooks(ws, cli);
+            });
+            await StatusAsync("自动交接已启用：" + path);
         }
-        catch (Exception ex)
+        catch (Exception e)
         {
-            SetStatus("启用失败：" + ex.Message);
+            await StatusAsync("启用失败：" + e.Message);
         }
     }
 
-    void Refresh()
+    async Task HandoffAsync()
     {
-        var store = new HubStore(WorkspaceHub.HubRoot(_workspace));
-        var rows = store.List().Select(m => new SessionRow
+        try
         {
-            Key = m.Key,
-            Title = string.IsNullOrWhiteSpace(m.Title) ? m.SessionId : m.Title,
-            Client = Clients.DisplayName(m.Client),
-            When = m.Updated.ToLocalTime().ToString("MM-dd HH:mm"),
-            Counts = $"{m.MessageCount} 条 · {m.AttachmentCount} 附件",
-            Meta = m,
-        }).ToList();
-        SessionList.ItemsSource = rows;
-        if (rows.Count > 0 && _selected is null)
-            SessionList.SelectedIndex = 0;
-        SetStatus($"工作区：{_workspace}   共 {rows.Count} 个会话" + (_hooksPath.Length > 0 ? "   · 自动交接已启用" : ""));
-    }
-
-    void OnSwitchWorkspace(object sender, RoutedEventArgs e)
-    {
-        var p = WorkspaceBox.Text.Trim();
-        if (!Directory.Exists(p))
-        {
-            SetStatus("路径不存在：" + p);
-            return;
+            var ws = _workspace;
+            await Task.Run(() => WorkspaceHub.WriteHandoff(ws));
+            await StatusAsync("交接内容已写入：" + WorkspaceHub.HandoffPath(ws));
+            await PushDataAsync();
         }
-        _workspace = p;
-        SaveWorkspace();
-        _selected = null;
-        _hooksPath = "";
-        MessagePanel.Children.Clear();
-        _ = ImportAll().ContinueWith(_ => DispatcherQueue.TryEnqueue(Refresh));
+        catch (Exception e)
+        {
+            await StatusAsync("写入失败：" + e.Message);
+        }
     }
 
-    void OnImport(object sender, RoutedEventArgs e) =>
-        _ = ImportAll().ContinueWith(_ => DispatcherQueue.TryEnqueue(Refresh));
-
-    void OnOpenFolder(object sender, RoutedEventArgs e)
+    void OpenFolder()
     {
         try { System.Diagnostics.Process.Start("explorer.exe", _workspace); }
-        catch (Exception ex) { SetStatus("打开失败：" + ex.Message); }
+        catch (Exception e) { _ = StatusAsync("打开失败：" + e.Message); }
     }
 
-    void OnHandoff(object sender, RoutedEventArgs e)
+    async Task ChooseWorkspaceAsync()
     {
-        WorkspaceHub.WriteHandoff(_workspace);
-        HandoffBox.Text = File.ReadAllText(WorkspaceHub.HandoffPath(_workspace));
-        HandoffExpander.IsExpanded = true;
-        SetStatus("交接内容已生成：" + WorkspaceHub.HandoffPath(_workspace));
-    }
-
-    void OnCopyHandoff(object sender, RoutedEventArgs e)
-    {
-        var dp = new DataPackage();
-        dp.SetText(HandoffBox.Text);
-        Clipboard.SetContent(dp);
-        SetStatus("交接内容已复制到剪贴板");
-    }
-
-    void OnSessionSelected(object sender, SelectionChangedEventArgs e)
-    {
-        if (SessionList.SelectedItem is not SessionRow row) return;
-        _selected = row.Meta;
-        DetailTitle.Text = $"{Clients.DisplayName(row.Meta.Client)} · {row.Title}";
-        try { RenderSession(row.Meta); }
-        catch (Exception ex) { SetStatus("渲染失败：" + ex.Message); }
-    }
-
-    void RenderSession(SessionMeta meta)
-    {
-        MessagePanel.Children.Clear();
-        var dir = Path.Combine(WorkspaceHub.HubRoot(_workspace), "sessions", meta.Key);
-        var msgFile = Path.Combine(dir, "messages.jsonl");
-        if (!File.Exists(msgFile))
+        try
         {
-            MessagePanel.Children.Add(new TextBlock { Text = "没有消息记录" });
-            return;
-        }
-
-        var attDir = Path.Combine(dir, "attachments");
-        var shown = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var line in File.ReadLines(msgFile))
-        {
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            JsonElement o;
-            try { o = JsonDocument.Parse(line).RootElement; }
-            catch (JsonException) { continue; }
-            if (o.ValueKind != JsonValueKind.Object) continue;
-
-            var role = o.TryGetProperty("role", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString() ?? "" : "";
-            var text = o.TryGetProperty("text", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() ?? "" : "";
-            var tool = o.TryGetProperty("tool", out var tn) && tn.ValueKind == JsonValueKind.String ? tn.GetString() : null;
-
-            if (role == Roles.ToolCall || role == Roles.ToolResult)
+            var picker = new FolderPicker
             {
-                MessagePanel.Children.Add(new TextBlock
-                {
-                    Text = (role == Roles.ToolCall ? $"工具 {tool}" : "工具结果") + "：" + Text.OneLine(text, 200),
-                    FontSize = 12,
-                    Foreground = new SolidColorBrush(Colors.Gray),
-                    TextWrapping = TextWrapping.Wrap,
-                    Margin = new Thickness(28, 0, 0, 0),
-                });
-                continue;
-            }
-
-            var isUser = role == Roles.User;
-            var bubble = new Border
-            {
-                CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(10),
-                MaxWidth = 560,
-                HorizontalAlignment = isUser ? HorizontalAlignment.Right : HorizontalAlignment.Left,
-                Background = new SolidColorBrush(isUser
-                    ? Color.FromArgb(255, 221, 235, 255)
-                    : Color.FromArgb(255, 244, 244, 246)),
+                SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
             };
-            var stack = new StackPanel { Spacing = 6 };
-            stack.Children.Add(new TextBlock
-            {
-                Text = text,
-                TextWrapping = TextWrapping.Wrap,
-                IsTextSelectionEnabled = true,
-                Foreground = new SolidColorBrush(Colors.Black),
-            });
+            picker.FileTypeFilter.Add("*");
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            var folder = await picker.PickSingleFolderAsync();
+            if (folder is null) return;
+            _workspace = folder.Path;
+            SaveWorkspace();
+            if (HubView.CoreWebView2 is not null) MapAssets(HubView.CoreWebView2);
+            await StatusAsync("已切换工作区：" + _workspace);
+            await RefreshAsync();
+        }
+        catch (Exception e)
+        {
+            await StatusAsync("切换工作区失败：" + e.Message);
+        }
+    }
 
-            if (o.TryGetProperty("attachments", out var atts) && atts.ValueKind == JsonValueKind.Array)
+    async Task RunSmokeAsync()
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(25);
+        while (DateTime.UtcNow < deadline)
+        {
+            try
             {
-                foreach (var a in atts.EnumerateArray())
+                var state = await HubView.CoreWebView2.ExecuteScriptAsync(
+                    "window.__AIHUB_STATE__ ? JSON.stringify(window.__AIHUB_STATE__) : ''");
+                if (!string.IsNullOrEmpty(state) && state != "\"\"")
                 {
-                    if (a.ValueKind != JsonValueKind.String) continue;
-                    var name = a.GetString();
-                    if (string.IsNullOrWhiteSpace(name)) continue;
-                    var path = Path.Combine(attDir, name);
-                    if (!File.Exists(path)) continue;
-                    shown.Add(path);
-                    var ext = Path.GetExtension(path).ToLowerInvariant();
-                    if (ext is ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp" or ".bmp")
-                    {
-                        stack.Children.Add(new Image
-                        {
-                            Source = new BitmapImage(new Uri(path)),
-                            MaxHeight = 180,
-                            MaxWidth = 520,
-                            Stretch = Stretch.Uniform,
-                            HorizontalAlignment = HorizontalAlignment.Left,
-                        });
-                    }
-                    else
-                    {
-                        stack.Children.Add(new TextBlock { Text = "附件：" + name, FontSize = 12, Foreground = new SolidColorBrush(Colors.DimGray) });
-                    }
+                    var asset = await CheckAssetAsync();
+                    FinishSmoke(true, state + " asset=" + asset);
+                    return;
                 }
             }
-
-            bubble.Child = stack;
-            MessagePanel.Children.Add(bubble);
-        }
-
-        if (Directory.Exists(attDir))
-        {
-            foreach (var f in Directory.EnumerateFiles(attDir))
+            catch (Exception e)
             {
-                if (shown.Contains(f)) continue;
-                MessagePanel.Children.Add(new TextBlock { Text = "附件：" + Path.GetFileName(f), FontSize = 12, Foreground = new SolidColorBrush(Colors.DimGray) });
+                FinishSmoke(false, "eval: " + e.Message);
+                return;
             }
+            await Task.Delay(400);
         }
+        FinishSmoke(false, "timeout waiting for injected data");
+    }
+
+    async Task<string> CheckAssetAsync()
+    {
+        const string start = """
+            (() => {
+              window.__SMOKE_IMG = 'none';
+              const d = window.__AIHUB_DATA__;
+              if (!d || !d.assetBase) return;
+              for (const s of d.sessions) {
+                for (const m of s.messages) {
+                  for (const a of (m.attachments || [])) {
+                    if (a.kind !== 'image') continue;
+                    const img = new Image();
+                    window.__SMOKE_IMG = 'pending';
+                    img.onload = () => { window.__SMOKE_IMG = 'ok ' + img.naturalWidth; };
+                    img.onerror = () => { window.__SMOKE_IMG = 'error'; };
+                    img.src = d.assetBase + '/sessions/' + encodeURIComponent(s.key) + '/attachments/' + encodeURIComponent(a.name);
+                    return;
+                  }
+                }
+              }
+            })()
+            """;
+        try
+        {
+            await HubView.CoreWebView2.ExecuteScriptAsync(start);
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (DateTime.UtcNow < deadline)
+            {
+                var value = await HubView.CoreWebView2.ExecuteScriptAsync("String(window.__SMOKE_IMG || '')");
+                var text = value.Trim('"');
+                if (text != "none" && text != "pending" && text.Length > 0) return text;
+                await Task.Delay(250);
+            }
+            return "timeout";
+        }
+        catch (Exception e)
+        {
+            return "eval-error " + e.Message;
+        }
+    }
+
+    void FinishSmoke(bool ok, string message)
+    {
+        if (!_smoke) return;
+        try
+        {
+            File.WriteAllText(Path.Combine(Path.GetTempPath(), "aihub-app-smoke.log"),
+                (ok ? "OK " : "FAIL ") + message + Environment.NewLine);
+        }
+        catch (IOException) { }
+        try { AppWindow.Hide(); } catch (InvalidOperationException) { }
+        DispatcherQueue.TryEnqueue(() => Environment.Exit(ok ? 0 : 1));
     }
 }
