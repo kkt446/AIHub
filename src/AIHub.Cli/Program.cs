@@ -23,6 +23,14 @@ string ResolveWorkspace(HookInput? input)
     return Opt("workspace") ?? Directory.GetCurrentDirectory();
 }
 
+(int toQoder, int toCn) SyncDbs(string workspace)
+{
+    int a = 0, b = 0;
+    try { a = DbSync.Sync(workspace, Clients.QoderCn, Clients.Qoder); } catch (Exception) { }
+    try { b = DbSync.Sync(workspace, Clients.Qoder, Clients.QoderCn); } catch (Exception) { }
+    return (a, b);
+}
+
 switch (cmd)
 {
     case "hook-session-start":
@@ -33,6 +41,7 @@ switch (cmd)
         WorkspaceHub.ImportQoder(workspace);
         WorkspaceHub.ImportDsh(workspace);
         WorkspaceHub.WriteHandoff(workspace);
+        SyncDbs(workspace);
         Console.Out.Write(WorkspaceHub.SessionStartJson(workspace));
         return 0;
     }
@@ -44,6 +53,7 @@ switch (cmd)
         WorkspaceHub.ImportQoder(workspace);
         WorkspaceHub.ImportDsh(workspace);
         WorkspaceHub.WriteHandoff(workspace);
+        SyncDbs(workspace);
         Console.Out.Write(WorkspaceHub.UserPromptJson(workspace));
         return 0;
     }
@@ -55,6 +65,7 @@ switch (cmd)
         WorkspaceHub.ImportQoder(workspace);
         WorkspaceHub.ImportDsh(workspace);
         WorkspaceHub.WriteHandoff(workspace);
+        SyncDbs(workspace);
         return 0;
     }
     case "import":
@@ -75,6 +86,24 @@ switch (cmd)
         Console.WriteLine($"hooks={path} workspace={workspace}");
         return 0;
     }
+    case "db-sync":
+    {
+        var workspace = ResolveWorkspace(null);
+        int a = 0, b = 0;
+        string err = "";
+        try { a = DbSync.Sync(workspace, Clients.QoderCn, Clients.Qoder); } catch (Exception e) { err += " qoder:" + e.Message; }
+        try { b = DbSync.Sync(workspace, Clients.Qoder, Clients.QoderCn); } catch (Exception e) { err += " qodercn:" + e.Message; }
+        Console.WriteLine($"cn->qoder={a} qoder->cn={b} workspace={workspace}{err}");
+        return err.Length == 0 ? 0 : 1;
+    }
+    case "db-sync-undo":
+    {
+        var workspace = ResolveWorkspace(null);
+        var q = DbSync.Undo(workspace, Clients.Qoder);
+        var c = DbSync.Undo(workspace, Clients.QoderCn);
+        Console.WriteLine($"removed qoder={q} qodercn={c} workspace={workspace}");
+        return 0;
+    }
     case "handoff":
     {
         Console.Out.Write(WorkspaceHub.BuildHandoff(ResolveWorkspace(null)));
@@ -87,6 +116,6 @@ switch (cmd)
         return 0;
     }
     default:
-        Console.WriteLine("aihub hook-session-start|hook-user-prompt|hook-stop|import|setup-hooks|handoff|list [--workspace <dir>]");
+        Console.WriteLine("aihub hook-session-start|hook-user-prompt|hook-stop|import|setup-hooks|db-sync|db-sync-undo|handoff|list [--workspace <dir>]");
         return 1;
 }
