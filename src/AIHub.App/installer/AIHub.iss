@@ -46,8 +46,8 @@ Source: "..\..\..\dist\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesub
 Source: "..\..\..\dist\cli\aihub.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\AIHub"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\AIHub"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autoprograms}\AIHub"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
+Name: "{autodesktop}\AIHub"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
