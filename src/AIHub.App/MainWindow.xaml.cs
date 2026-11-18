@@ -26,6 +26,7 @@ public sealed partial class MainWindow : Window
 {
     string _workspace = "";
     SessionMeta? _selected;
+    string _hooksPath = "";
 
     public MainWindow()
     {
@@ -85,49 +86,59 @@ public sealed partial class MainWindow : Window
 
     void SetStatus(string text) => StatusText.Text = text;
 
+    static string? FindCli()
+    {
+        var baseDir = AppContext.BaseDirectory;
+        var candidates = new[]
+        {
+            Path.Combine(baseDir, "aihub.exe"),
+            Path.GetFullPath(Path.Combine(baseDir, "..", "cli", "aihub.exe")),
+        };
+        return candidates.FirstOrDefault(File.Exists);
+    }
+
     async Task ImportAll()
     {
         try
         {
             SetStatus("正在导入三端会话…");
             var ws = _workspace;
-            var (q, d) = await Task.Run(() =>
+            var (q, d, hooks) = await Task.Run(() =>
             {
-                int qq = 0;
-                var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                var store = new HubStore(WorkspaceHub.HubRoot(ws));
-                foreach (var dir in new[]
-                         {
-                             Path.Combine(home, ".qoder", "projects"),
-                             Path.Combine(home, ".qoder-cn", "projects"),
-                         })
-                {
-                    if (!Directory.Exists(dir)) continue;
-                    foreach (var f in Directory.EnumerateFiles(dir, "*.jsonl", SearchOption.AllDirectories))
-                    {
-                        if (f.Contains(@"\subagents\", StringComparison.OrdinalIgnoreCase)) continue;
-                        try
-                        {
-                            var s = QoderImporter.Load(f);
-                            if (s.Messages.Count == 0) continue;
-                            if (!string.IsNullOrWhiteSpace(s.Cwd) &&
-                                !Path.GetFullPath(s.Cwd).TrimEnd('\\').Equals(Path.GetFullPath(ws).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
-                                continue;
-                            store.Save(s);
-                            qq++;
-                        }
-                        catch (IOException) { }
-                    }
-                }
+                var qq = WorkspaceHub.ImportQoder(ws);
                 var dd = WorkspaceHub.ImportDsh(ws);
+                var hookPath = "";
+                var cli = FindCli();
+                if (cli is not null)
+                {
+                    try { hookPath = WorkspaceHub.EnsureHooks(ws, cli); }
+                    catch (IOException) { }
+                }
                 WorkspaceHub.WriteHandoff(ws);
-                return (qq, dd);
+                return (qq, dd, hookPath);
             });
-            SetStatus($"导入完成：Qoder {q} 个会话，dsh {d} 个会话");
+            SetStatus(hooks.Length > 0
+                ? $"导入完成：Qoder {q} 个会话，dsh {d} 个会话；自动交接已启用（{hooks}）"
+                : $"导入完成：Qoder {q} 个会话，dsh {d} 个会话；未找到 aihub.exe，自动交接未启用");
+            _hooksPath = hooks;
         }
         catch (Exception e)
         {
             SetStatus("导入失败：" + e.Message);
+        }
+    }
+
+    void OnSetupHooks(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var cli = FindCli() ?? throw new FileNotFoundException("找不到 aihub.exe");
+            var path = WorkspaceHub.EnsureHooks(_workspace, cli);
+            SetStatus("自动交接已启用：" + path);
+        }
+        catch (Exception ex)
+        {
+            SetStatus("启用失败：" + ex.Message);
         }
     }
 
@@ -146,7 +157,7 @@ public sealed partial class MainWindow : Window
         SessionList.ItemsSource = rows;
         if (rows.Count > 0 && _selected is null)
             SessionList.SelectedIndex = 0;
-        SetStatus($"工作区：{_workspace}   共 {rows.Count} 个会话");
+        SetStatus($"工作区：{_workspace}   共 {rows.Count} 个会话" + (_hooksPath.Length > 0 ? "   · 自动交接已启用" : ""));
     }
 
     void OnSwitchWorkspace(object sender, RoutedEventArgs e)
@@ -160,6 +171,7 @@ public sealed partial class MainWindow : Window
         _workspace = p;
         SaveWorkspace();
         _selected = null;
+        _hooksPath = "";
         MessagePanel.Children.Clear();
         _ = ImportAll().ContinueWith(_ => DispatcherQueue.TryEnqueue(Refresh));
     }

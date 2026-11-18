@@ -22,13 +22,15 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <TextBlock Text="通用工作区" VerticalAlignment="Center" Style="{ThemeResource BodyStrongTextBlockStyle}"/>
             <TextBox x:Name="WorkspaceBox" Grid.Column="1" PlaceholderText="工作区文件夹路径" VerticalAlignment="Center"/>
             <Button x:Name="SwitchButton" Grid.Column="2" Content="打开" Click="OnSwitchWorkspace" Style="{ThemeResource AccentButtonStyle}"/>
             <Button x:Name="ImportButton" Grid.Column="3" Content="导入三端会话" Click="OnImport"/>
-            <Button x:Name="HandoffButton" Grid.Column="4" Content="生成交接" Click="OnHandoff"/>
-            <Button x:Name="OpenFolderButton" Grid.Column="5" Content="打开文件夹" Click="OnOpenFolder"/>
+            <Button x:Name="HooksButton" Grid.Column="4" Content="启用自动交接" Click="OnSetupHooks"/>
+            <Button x:Name="HandoffButton" Grid.Column="5" Content="生成交接" Click="OnHandoff"/>
+            <Button x:Name="OpenFolderButton" Grid.Column="6" Content="打开文件夹" Click="OnOpenFolder"/>
         </Grid>
 
         <TextBlock x:Name="StatusText" Grid.Row="1" Style="{ThemeResource CaptionTextBlockStyle}"

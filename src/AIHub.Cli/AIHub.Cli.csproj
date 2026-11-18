@@ -9,6 +9,9 @@
     <AssemblyName>aihub</AssemblyName>
     <RootNamespace>AIHub.Cli</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
   <ItemGroup>

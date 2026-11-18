@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace AIHub.Core;
 
@@ -42,12 +43,75 @@ public static class WorkspaceHub
     {
         if (!File.Exists(transcriptPath)) return null;
         var session = QoderImporter.Load(transcriptPath);
-        var meta = new HubStore(HubRoot(workspace)).Save(session);
-
+        var ws = Path.GetFullPath(workspace).TrimEnd('\\');
         if (!string.IsNullOrWhiteSpace(session.Cwd) &&
-            Path.GetFullPath(session.Cwd).TrimEnd('\\').Equals(Path.GetFullPath(workspace).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
-            return meta;
-        return meta;
+            !Path.GetFullPath(session.Cwd).TrimEnd('\\').Equals(ws, StringComparison.OrdinalIgnoreCase))
+            return null;
+        return new HubStore(HubRoot(workspace)).Save(session);
+    }
+
+    // Qoder 把项目目录名编码为 cwd 的非字母数字字符替换成 '-'，据此快速定位，避免每次全量扫描。
+    static string EncodeProjectDir(string path)
+    {
+        var sb = new StringBuilder(path.Length);
+        foreach (var ch in path.TrimEnd('\\'))
+            sb.Append(char.IsAsciiLetterOrDigit(ch) || ch == '-' ? ch : '-');
+        return sb.ToString();
+    }
+
+    public static int ImportQoder(string workspace)
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var ws = Path.GetFullPath(workspace).TrimEnd('\\');
+        var store = new HubStore(HubRoot(workspace));
+        var encoded = EncodeProjectDir(ws);
+        var roots = new[]
+        {
+            Path.Combine(home, ".qoder", "projects"),
+            Path.Combine(home, ".qoder-cn", "projects"),
+        };
+
+        var dirs = new List<string>();
+        foreach (var root in roots)
+        {
+            var candidate = Path.Combine(root, encoded);
+            if (Directory.Exists(candidate)) dirs.Add(candidate);
+        }
+        if (dirs.Count == 0)
+        {
+            foreach (var root in roots)
+            {
+                if (!Directory.Exists(root)) continue;
+                foreach (var d in Directory.EnumerateDirectories(root))
+                {
+                    try
+                    {
+                        if (Directory.EnumerateFiles(d, "*.jsonl").Any()) dirs.Add(d);
+                    }
+                    catch (IOException) { }
+                }
+            }
+        }
+
+        int n = 0;
+        foreach (var dir in dirs)
+        {
+            foreach (var f in Directory.EnumerateFiles(dir, "*.jsonl", SearchOption.TopDirectoryOnly))
+            {
+                try
+                {
+                    var s = QoderImporter.Load(f);
+                    if (s.Messages.Count == 0) continue;
+                    if (!string.IsNullOrWhiteSpace(s.Cwd) &&
+                        !Path.GetFullPath(s.Cwd).TrimEnd('\\').Equals(ws, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    store.Save(s);
+                    n++;
+                }
+                catch (IOException) { }
+            }
+        }
+        return n;
     }
 
     public static int ImportDsh(string workspace, string? dshRoot = null)
@@ -128,17 +192,107 @@ public static class WorkspaceHub
     public static string SessionStartJson(string workspace)
     {
         var ctx = BuildHandoff(workspace);
-        var payload = new
+        return HookJson("SessionStart", ctx);
+    }
+
+    static string HookJson(string eventName, string context) =>
+        JsonSerializer.Serialize(new
         {
             hookSpecificOutput = new
             {
-                hookEventName = "SessionStart",
-                additionalContext = ctx,
+                hookEventName = eventName,
+                additionalContext = context,
             },
-        };
-        return JsonSerializer.Serialize(payload, new JsonSerializerOptions
+        }, new JsonSerializerOptions
         {
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         });
+
+    public static string BuildLiveDigest(string workspace, int maxChars = 900)
+    {
+        var store = new HubStore(HubRoot(workspace));
+        var sessions = store.List();
+        if (sessions.Count == 0) return "";
+        var sb = new StringBuilder();
+        sb.AppendLine("# 共享工作区最新进展（AIHub 自动注入）");
+        foreach (var s in sessions.Take(4))
+        {
+            sb.Append($"- [{Clients.DisplayName(s.Client)}] {s.Title}（{s.Updated.ToLocalTime():MM-dd HH:mm}）");
+            if (s.LastUserText.Length > 0) sb.Append(" 用户：" + Text.Shorten(s.LastUserText, 160));
+            if (s.LastAssistantText.Length > 0) sb.Append(" 助手：" + Text.Shorten(s.LastAssistantText, 200));
+            sb.AppendLine();
+        }
+        var text = sb.ToString();
+        return text.Length <= maxChars ? text : text[..maxChars] + "\n（已截断）";
+    }
+
+    public static string UserPromptJson(string workspace) =>
+        HookJson("UserPromptSubmit", BuildLiveDigest(workspace));
+
+    /// <summary>在 ${workspace}/.qoder/settings.json 写入 SessionStart / UserPromptSubmit / Stop 钩子（两个 Qoder 客户端共用）。</summary>
+    public static string EnsureHooks(string workspace, string? exePath = null)
+    {
+        var installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "AIHub", "aihub.exe");
+        exePath ??= File.Exists(installed) ? installed : Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
+            throw new FileNotFoundException("找不到 aihub.exe，请从安装目录运行");
+
+        var dir = Path.Combine(workspace, ".qoder");
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "settings.json");
+
+        JsonObject root;
+        try
+        {
+            root = (File.Exists(path) ? JsonNode.Parse(File.ReadAllText(path)) : null) as JsonObject ?? new JsonObject();
+        }
+        catch (JsonException)
+        {
+            root = new JsonObject();
+        }
+        var hooks = root["hooks"] as JsonObject ?? new JsonObject();
+        root["hooks"] = hooks;
+
+        void Install(string evt, string sub, string status)
+        {
+            var arr = hooks[evt] as JsonArray ?? new JsonArray();
+            for (int i = arr.Count - 1; i >= 0; i--)
+            {
+                var hs = (arr[i] as JsonObject)?["hooks"] as JsonArray;
+                if (hs is null) continue;
+                for (int j = hs.Count - 1; j >= 0; j--)
+                {
+                    var entry = hs[j] as JsonObject;
+                    var cmd = entry?["command"]?.GetValue<string>() ?? "";
+                    var args = entry?["args"] as JsonArray;
+                    var isOurs = cmd.Contains("aihub.exe", StringComparison.OrdinalIgnoreCase) ||
+                                 cmd.Contains("capture.py", StringComparison.OrdinalIgnoreCase) ||
+                                 (args is not null && args.Any(a => (a?.GetValue<string>() ?? "").StartsWith("hook-", StringComparison.Ordinal)));
+                    if (isOurs) hs.RemoveAt(j);
+                }
+                if (hs.Count == 0) arr.RemoveAt(i);
+            }
+            arr.Add(new JsonObject
+            {
+                ["hooks"] = new JsonArray(new JsonObject
+                {
+                    ["type"] = "command",
+                    ["command"] = exePath,
+                    ["args"] = new JsonArray(sub),
+                    ["timeout"] = 120,
+                    ["statusMessage"] = status,
+                }),
+            });
+            hooks[evt] = arr;
+        }
+
+        Install("SessionStart", "hook-session-start", "AIHub 同步交接内容");
+        Install("UserPromptSubmit", "hook-user-prompt", "AIHub 同步其他客户端进展");
+        Install("Stop", "hook-stop", "AIHub 归档本次对话");
+
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
+        File.Move(tmp, path, overwrite: true);
+        return path;
     }
 }
