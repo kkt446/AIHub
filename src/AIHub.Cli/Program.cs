@@ -109,6 +109,14 @@ switch (cmd)
         Console.Out.Write(WorkspaceHub.BuildHandoff(ResolveWorkspace(null)));
         return 0;
     }
+    case "export":
+    {
+        var workspace = ResolveWorkspace(null);
+        var outPath = Opt("out") ?? Path.Combine(workspace, "aihub-export.json");
+        WebExport.Write(workspace, outPath);
+        Console.WriteLine($"export={Path.GetFullPath(outPath)} workspace={workspace}");
+        return 0;
+    }
     case "list":
     {
         foreach (var m in new HubStore(WorkspaceHub.HubRoot(ResolveWorkspace(null))).List())
@@ -116,6 +124,6 @@ switch (cmd)
         return 0;
     }
     default:
-        Console.WriteLine("aihub hook-session-start|hook-user-prompt|hook-stop|import|setup-hooks|db-sync|db-sync-undo|handoff|list [--workspace <dir>]");
+        Console.WriteLine("aihub hook-session-start|hook-user-prompt|hook-stop|import|setup-hooks|db-sync|db-sync-undo|handoff|list|export [--workspace <dir>] [--out <file>]");
         return 1;
 }
