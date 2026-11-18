@@ -23,6 +23,13 @@ string ResolveWorkspace(HookInput? input)
     return Opt("workspace") ?? Directory.GetCurrentDirectory();
 }
 
+static IReadOnlyList<string> MirrorBoth(string workspace)
+{
+    var a = WorkspaceHub.MirrorSessions(workspace, Clients.QoderCn, Clients.Qoder);
+    var b = WorkspaceHub.MirrorSessions(workspace, Clients.Qoder, Clients.QoderCn);
+    return a.Concat(b).ToList();
+}
+
 switch (cmd)
 {
     case "hook-session-start":
@@ -33,6 +40,7 @@ switch (cmd)
         WorkspaceHub.ImportQoder(workspace);
         WorkspaceHub.ImportDsh(workspace);
         WorkspaceHub.WriteHandoff(workspace);
+        MirrorBoth(workspace);
         Console.Out.Write(WorkspaceHub.SessionStartJson(workspace));
         return 0;
     }
@@ -44,6 +52,7 @@ switch (cmd)
         WorkspaceHub.ImportQoder(workspace);
         WorkspaceHub.ImportDsh(workspace);
         WorkspaceHub.WriteHandoff(workspace);
+        MirrorBoth(workspace);
         Console.Out.Write(WorkspaceHub.UserPromptJson(workspace));
         return 0;
     }
@@ -55,6 +64,7 @@ switch (cmd)
         WorkspaceHub.ImportQoder(workspace);
         WorkspaceHub.ImportDsh(workspace);
         WorkspaceHub.WriteHandoff(workspace);
+        MirrorBoth(workspace);
         return 0;
     }
     case "import":
@@ -63,7 +73,8 @@ switch (cmd)
         var q = WorkspaceHub.ImportQoder(workspace);
         var d = WorkspaceHub.ImportDsh(workspace);
         WorkspaceHub.WriteHandoff(workspace);
-        Console.WriteLine($"qoder={q} dsh={d} workspace={workspace}");
+        var m = MirrorBoth(workspace);
+        Console.WriteLine($"qoder={q} dsh={d} mirrored={m.Count} workspace={workspace}");
         return 0;
     }
     case "setup-hooks":
@@ -72,7 +83,24 @@ switch (cmd)
         var path = WorkspaceHub.EnsureHooks(workspace);
         WorkspaceHub.ImportQoder(workspace);
         WorkspaceHub.WriteHandoff(workspace);
+        MirrorBoth(workspace);
         Console.WriteLine($"hooks={path} workspace={workspace}");
+        return 0;
+    }
+    case "mirror":
+    {
+        var workspace = ResolveWorkspace(null);
+        var added = MirrorBoth(workspace);
+        foreach (var id in added) Console.WriteLine($"mirrored {id}");
+        Console.WriteLine($"added={added.Count} workspace={workspace}");
+        return 0;
+    }
+    case "mirror-undo":
+    {
+        var workspace = ResolveWorkspace(null);
+        var q = WorkspaceHub.UndoMirror(workspace, Clients.Qoder);
+        var c = WorkspaceHub.UndoMirror(workspace, Clients.QoderCn);
+        Console.WriteLine($"removed qoder={q} qodercn={c} workspace={workspace}");
         return 0;
     }
     case "handoff":
@@ -87,6 +115,6 @@ switch (cmd)
         return 0;
     }
     default:
-        Console.WriteLine("aihub hook-session-start|hook-user-prompt|hook-stop|import|setup-hooks|handoff|list [--workspace <dir>]");
+        Console.WriteLine("aihub hook-session-start|hook-user-prompt|hook-stop|import|setup-hooks|handoff|list|mirror|mirror-undo [--workspace <dir>]");
         return 1;
 }

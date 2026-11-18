@@ -137,6 +137,117 @@ public static class WorkspaceHub
         return n;
     }
 
+    static string? ClientRoot(string client)
+    {
+        var (envName, folder) = client switch
+        {
+            Clients.Qoder => ("AIHUB_QODER_HOME", ".qoder"),
+            Clients.QoderCn => ("AIHUB_QODER_CN_HOME", ".qoder-cn"),
+            _ => ("", ""),
+        };
+        if (folder.Length == 0) return null;
+        var custom = Environment.GetEnvironmentVariable(envName);
+        if (!string.IsNullOrWhiteSpace(custom)) return custom;
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), folder);
+    }
+
+    public static string? ClientProjectDir(string workspace, string client)
+    {
+        var root = ClientRoot(client);
+        return root is null
+            ? null
+            : Path.Combine(root, "projects", EncodeProjectDir(Path.GetFullPath(workspace).TrimEnd('\\')));
+    }
+
+    /// <summary>
+    /// 把 fromClient 的会话文件复制进 toClient 的项目目录，让对方的任务列表里也能直接看到这些对话。
+    /// 只做新增，不覆盖已有文件；复制记录写入 .aihub-mirror.json，可用 UndoMirror 撤销。
+    /// </summary>
+    public static IReadOnlyList<string> MirrorSessions(string workspace, string fromClient, string toClient)
+    {
+        var from = ClientProjectDir(workspace, fromClient);
+        var to = ClientProjectDir(workspace, toClient);
+        if (from is null || to is null || !Directory.Exists(from)) return Array.Empty<string>();
+        Directory.CreateDirectory(to);
+
+        var manifestPath = Path.Combine(to, ".aihub-mirror.json");
+        var manifest = LoadManifest(manifestPath);
+        var added = new List<string>();
+        foreach (var f in Directory.EnumerateFiles(from, "*.jsonl", SearchOption.TopDirectoryOnly))
+        {
+            var id = Path.GetFileNameWithoutExtension(f);
+            if (!IsSafeSessionId(id)) continue;
+            var dst = Path.Combine(to, id + ".jsonl");
+            if (File.Exists(dst)) continue;
+            try
+            {
+                File.Copy(f, dst);
+                var srcDir = Path.Combine(from, id);
+                if (Directory.Exists(srcDir)) CopyDir(srcDir, Path.Combine(to, id));
+            }
+            catch (IOException) { continue; }
+            manifest.Add(new JsonObject { ["client"] = fromClient, ["id"] = id, ["at"] = DateTimeOffset.Now.ToString("o") });
+            added.Add(id);
+        }
+        if (added.Count > 0) WriteManifest(manifestPath, manifest);
+        return added;
+    }
+
+    public static int UndoMirror(string workspace, string toClient)
+    {
+        var to = ClientProjectDir(workspace, toClient);
+        if (to is null) return 0;
+        var manifestPath = Path.Combine(to, ".aihub-mirror.json");
+        if (!File.Exists(manifestPath)) return 0;
+        int n = 0;
+        foreach (var node in LoadManifest(manifestPath))
+        {
+            var id = (node as JsonObject)?["id"]?.GetValue<string>() ?? "";
+            if (!IsSafeSessionId(id)) continue;
+            TryDeleteFile(Path.Combine(to, id + ".jsonl"));
+            TryDeleteDir(Path.Combine(to, id));
+            n++;
+        }
+        TryDeleteFile(manifestPath);
+        return n;
+    }
+
+    static bool IsSafeSessionId(string id) =>
+        id.Length is > 0 and < 80 && !id.Contains("..") &&
+        id.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_');
+
+    static JsonArray LoadManifest(string path)
+    {
+        try { return JsonNode.Parse(File.ReadAllText(path)) as JsonArray ?? new JsonArray(); }
+        catch (Exception e) when (e is IOException or JsonException) { return new JsonArray(); }
+    }
+
+    static void WriteManifest(string path, JsonArray manifest)
+    {
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, manifest.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
+        File.Move(tmp, path, overwrite: true);
+    }
+
+    static void CopyDir(string src, string dst)
+    {
+        Directory.CreateDirectory(dst);
+        foreach (var f in Directory.EnumerateFiles(src))
+            File.Copy(f, Path.Combine(dst, Path.GetFileName(f)), overwrite: false);
+        foreach (var d in Directory.EnumerateDirectories(src))
+            CopyDir(d, Path.Combine(dst, Path.GetFileName(d)));
+    }
+
+    static void TryDeleteFile(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
+
+    static void TryDeleteDir(string path)
+    {
+        try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
+
     public static string BuildHandoff(string workspace, int maxChars = 3500)
     {
         var store = new HubStore(HubRoot(workspace));
