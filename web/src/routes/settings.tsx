@@ -18,7 +18,7 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { useHub } from "@/components/hub-provider";
-import { isDesktop, onDesktop, sendDesktop } from "@/lib/desktop";
+import { isDesktop, onDesktop, sendDesktop, copyText } from "@/lib/desktop";
 import { CLIENT_META, type ClientId } from "@/lib/hub";
 
 export const Route = createFileRoute("/settings")({
@@ -62,9 +62,8 @@ function SettingsPage() {
   };
 
   const copyPath = () => {
-    navigator.clipboard
-      .writeText(state.data.workspace)
-      .then(() => toast.success("工作区路径已复制"))
+    copyText(state.data.workspace)
+      .then((ok) => (ok ? toast.success("工作区路径已复制") : toast.error("复制失败")))
       .catch(() => toast.error("复制失败"));
   };
 

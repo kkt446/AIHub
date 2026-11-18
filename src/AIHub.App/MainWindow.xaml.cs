@@ -180,10 +180,14 @@ public sealed partial class MainWindow : Window
     void OnWebMessage(CoreWebView2 sender, CoreWebView2WebMessageReceivedEventArgs args)
     {
         string type;
+        var payload = "";
         try
         {
             using var doc = JsonDocument.Parse(args.WebMessageAsJson);
-            type = doc.RootElement.TryGetProperty("type", out var t) ? t.GetString() ?? "" : "";
+            var root = doc.RootElement;
+            type = root.TryGetProperty("type", out var t) ? t.GetString() ?? "" : "";
+            if (root.TryGetProperty("payload", out var p) && p.ValueKind == JsonValueKind.String)
+                payload = p.GetString() ?? "";
         }
         catch (JsonException) { return; }
 
@@ -195,8 +199,23 @@ public sealed partial class MainWindow : Window
             case "syncUndo": _ = UndoSyncAsync(); break;
             case "hooks": _ = HooksAsync(); break;
             case "handoff": _ = HandoffAsync(); break;
+            case "copy": CopyToClipboard(payload); break;
             case "openFolder": OpenFolder(); break;
             case "chooseWorkspace": _ = ChooseWorkspaceAsync(); break;
+        }
+    }
+
+    void CopyToClipboard(string text)
+    {
+        try
+        {
+            var dp = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            dp.SetText(text);
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dp);
+        }
+        catch (Exception e)
+        {
+            _ = StatusAsync("复制失败：" + e.Message);
         }
     }
 

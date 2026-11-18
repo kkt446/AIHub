@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useHub } from "@/components/hub-provider";
-import { isDesktop, onDesktop, sendDesktop } from "@/lib/desktop";
+import { copyText, isDesktop, onDesktop, sendDesktop } from "@/lib/desktop";
 import { buildHandoff } from "@/lib/handoff";
 import { oneLine, relTime, lastMessage } from "@/lib/format";
 
@@ -29,10 +29,9 @@ function HandoffPage() {
   );
 
   const copy = () => {
-    navigator.clipboard
-      .writeText(markdown)
-      .then(() => toast.success("交接内容已复制"))
-      .catch(() => toast.error("复制失败，浏览器未授权剪贴板"));
+    copyText(markdown)
+      .then((ok) => (ok ? toast.success("交接内容已复制") : toast.error("复制失败")))
+      .catch(() => toast.error("复制失败"));
   };
 
   const download = () => {

@@ -5,6 +5,7 @@ import { MessageRow } from "@/components/message-row";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useHub } from "@/components/hub-provider";
+import { copyText } from "@/lib/desktop";
 import { countAttachments, fmtClock, relTime } from "@/lib/format";
 import { CLIENT_META, ROLE_LABEL, type HubSession } from "@/lib/hub";
 
@@ -14,10 +15,9 @@ function copyTranscript(session: HubSession) {
       ? `[${ROLE_LABEL[m.role]}${m.tool ? ` · ${m.tool}` : ""}] ${m.text}`
       : `[${ROLE_LABEL[m.role]}] ${m.text}`))
     .join("\n\n");
-  navigator.clipboard
-    .writeText(`# ${session.title}\n\n${body}`)
-    .then(() => toast.success("会话内容已复制"))
-    .catch(() => toast.error("复制失败，浏览器未授权剪贴板"));
+  copyText(`# ${session.title}\n\n${body}`)
+    .then((ok) => (ok ? toast.success("会话内容已复制") : toast.error("复制失败")))
+    .catch(() => toast.error("复制失败"));
 }
 
 export function SessionDetail({ session }: { session: HubSession | null }) {

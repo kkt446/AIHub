@@ -20,11 +20,19 @@ export function isDesktop(): boolean {
   return Boolean(window.chrome?.webview);
 }
 
-export function sendDesktop(type: string): boolean {
+export function sendDesktop(type: string, payload?: string): boolean {
   const webview = window.chrome?.webview;
   if (!webview) return false;
-  webview.postMessage({ type });
+  webview.postMessage(payload === undefined ? { type } : { type, payload });
   return true;
+}
+
+export function copyText(text: string): Promise<boolean> {
+  if (isDesktop()) return Promise.resolve(sendDesktop("copy", text));
+  return navigator.clipboard.writeText(text).then(
+    () => true,
+    () => false,
+  );
 }
 
 export function onDesktop(handler: (event: DesktopEvent) => void): () => void {
