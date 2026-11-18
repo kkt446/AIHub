@@ -6,6 +6,7 @@ namespace AIHub.Core;
 
 /// <summary>
 /// 在两个 Qoder 客户端的本地任务库（main.sqlite）之间同步会话，使一端的对话出现在另一端的任务列表里。
+/// 同时补齐对话执行历史（projects 下的 .jsonl 与 state.json），否则任务可看但无法继续。
 /// 只新增/补齐消息，不删除对方数据；写入记录保存在目标库旁的 .aihub-dbsync.json，可用 Undo 撤销。
 /// </summary>
 public static class DbSync
@@ -61,6 +62,7 @@ public static class DbSync
             if (exists)
             {
                 AppendMessages(dst, srcPath, id);
+                MirrorTranscript(workspace, fromClient, toClient, id);
                 continue;
             }
 
@@ -71,12 +73,70 @@ public static class DbSync
                 backedUp = true;
             }
             CopySession(dst, srcPath, id, dstWorkspace, targetModel);
+            MirrorTranscript(workspace, fromClient, toClient, id);
             manifest.Add(new JsonObject { ["client"] = fromClient, ["id"] = id, ["at"] = DateTimeOffset.Now.ToString("o") });
             inserted.Add(id);
         }
 
         if (inserted.Count > 0) SaveManifest(ManifestPath(dstPath), manifest);
         return inserted.Count;
+    }
+
+    static string? ClientHome(string client)
+    {
+        var env = client switch
+        {
+            Clients.Qoder => Environment.GetEnvironmentVariable("AIHUB_QODER_HOME"),
+            Clients.QoderCn => Environment.GetEnvironmentVariable("AIHUB_QODER_CN_HOME"),
+            _ => null,
+        };
+        if (!string.IsNullOrWhiteSpace(env)) return env;
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return client switch
+        {
+            Clients.Qoder => Path.Combine(home, ".qoder"),
+            Clients.QoderCn => Path.Combine(home, ".qoder-cn"),
+            _ => null,
+        };
+    }
+
+    static string? TranscriptDir(string client, string workspace)
+    {
+        var home = ClientHome(client);
+        if (home is null) return null;
+        return Path.Combine(home, "projects", WorkspaceHub.EncodeProjectDir(Path.GetFullPath(workspace).TrimEnd('\\')));
+    }
+
+    /// <summary>补齐目标端缺失的执行历史；已存在的文件不覆盖，避免覆盖目标端继续对话后的进度。</summary>
+    static void MirrorTranscript(string workspace, string fromClient, string toClient, string id)
+    {
+        if (!IsSafeId(id)) return;
+        var from = TranscriptDir(fromClient, workspace);
+        var to = TranscriptDir(toClient, workspace);
+        if (from is null || to is null || !Directory.Exists(from)) return;
+        try
+        {
+            Directory.CreateDirectory(to);
+            var jsonl = Path.Combine(from, id + ".jsonl");
+            var jsonlDst = Path.Combine(to, id + ".jsonl");
+            if (File.Exists(jsonl) && !File.Exists(jsonlDst))
+                File.Copy(jsonl, jsonlDst);
+
+            var state = Path.Combine(from, id);
+            var stateDst = Path.Combine(to, id);
+            if (Directory.Exists(state) && !Directory.Exists(stateDst))
+                CopyTree(state, stateDst);
+        }
+        catch (IOException) { }
+    }
+
+    static void CopyTree(string source, string target)
+    {
+        Directory.CreateDirectory(target);
+        foreach (var file in Directory.EnumerateFiles(source))
+            File.Copy(file, Path.Combine(target, Path.GetFileName(file)), overwrite: false);
+        foreach (var dir in Directory.EnumerateDirectories(source))
+            CopyTree(dir, Path.Combine(target, Path.GetFileName(dir)));
     }
 
     public static int Undo(string workspace, string toClient)

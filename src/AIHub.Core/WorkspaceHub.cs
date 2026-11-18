@@ -51,7 +51,7 @@ public static class WorkspaceHub
     }
 
     // Qoder 把项目目录名编码为 cwd 的非字母数字字符替换成 '-'，据此快速定位，避免每次全量扫描。
-    static string EncodeProjectDir(string path)
+    internal static string EncodeProjectDir(string path)
     {
         var sb = new StringBuilder(path.Length);
         foreach (var ch in path.TrimEnd('\\'))
